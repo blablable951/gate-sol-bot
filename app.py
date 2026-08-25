@@ -214,15 +214,19 @@ def webhook():
                 print(f"{'🔴' if close_side == 'sell' else '🟢'} ЗАКРЫВАЮ {side}: {size} {symbol}...")
                 order = exchange.create_order(symbol, 'market', close_side, size, None, params)
 
-        print(f"✅ ОРДЕР ИСПОЛНЕН: {order['id']} | {order['symbol']} | {order['side']} {order['amount']}")
+        if not isinstance(order, dict) or not order.get('id'):
+            print(f"⚠️ Биржа не вернула данные ордера: {order!r}")
+            return jsonify({"ok": False, "error": "exchange_returned_empty_order", "details": "Позиция могла отсутствовать или Gate не подтвердил ордер"}), 502
+
+        print(f"✅ ОРДЕР ИСПОЛНЕН: {order['id']} | {order.get('symbol', symbol)} | {order.get('side', action)} {order.get('amount', size if 'size' in locals() else amount)}")
         print(f"{'='*50}\n")
 
         return jsonify({
-            "ok": True, 
+            "ok": True,
             "order_id": order['id'],
-            "symbol": order['symbol'],
-            "side": order['side'],
-            "amount": order['amount'],
+            "symbol": order.get('symbol', symbol),
+            "side": order.get('side', action),
+            "amount": order.get('amount', size if 'size' in locals() else amount),
             "price": order.get('price') or price
         })
 
