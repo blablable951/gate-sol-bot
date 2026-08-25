@@ -166,92 +166,50 @@ def webhook():
                 print(f"🟢 ПОКУПКА {amount} {symbol} по рынку...")
                 order = exchange.create_market_buy_order(symbol, amount)
             elif action in ['sell', 'short', 'close', 'close_long', 'close_short']:
-                # Для спота short = sell
-                # Проверяем баланс чтобы не продать больше чем есть
-                balance = exchange.fetch_balance()
-                coin = symbol.split('/')[0].split(':')[0]
-                free = balance.get(coin, {}).get('free', 0)
-                print(f"Баланс {coin}: {free}")
-                if free < amount:
-                    print(f"⚠️ На балансе меньше чем нужно, продаем все что есть: {free}")
-                    amount = free
-                    amount = float(exchange.amount_to_precision(symbol, amount))
-                if amount == 0:
-                    return jsonify({"error": f"no balance {coin}"}), 400
-                print(f"🔴 ПРОДАЖА {amount} {symbol} по рынку...")
-                order = exchange.create_market_sell_order(symbol, amount)
-
-        else: # swap - фьючерсы (buy=открыть лонг, sell/short=закрыть лонг)
-            if action in ['buy', 'long']:
-                # ставим плечо 10x перед открытием
+                # Закрываем лонг в one-way режиме Gate. SELL всегда reduceOnly.
+                # Сначала пробуем точный endpoint позиции, затем общий список.
+                positions = []
                 try:
-                    lev = int(os.getenv('GATE_LEVERAGE', '10'))
-                    exchange.set_leverage(lev, symbol)
-                    print(f"⚙️ Плечо установлено: {lev}x для {symbol}")
+                    position = exchange.fetch_position(symbol, {'settle': 'usdt'})
+                    if position:
+                        positions = [position]
                 except Exception as e:
-                    print(f"⚠️ Не удалось поставить плечо: {e}")
-                print(f"🟢 ЛОНГ {amount} {symbol}...")
-                order = exchange.create_market_buy_order(symbol, amount)
-            elif action in ['sell', 'short', 'close', 'close_long', 'close_short']:
-                # Закрыть позицию - берем размер позиции и закрываем обратным ордером
-                # Для юзера short = закрыть buy, а не открыть шорт
-                try:
-                    positions = exchange.fetch_positions([symbol])
-                except:
-                    positions = exchange.fetch_positions()
-                size = 0
-                side = None
-                print(f"DEBUG positions raw: {positions}")
-                for p in positions:
-                    print(f"DEBUG p: symbol={p.get('symbol')} side={p.get('side')} contracts={p.get('contracts')} size={p.get('size')} info_size={p.get('info',{}).get('size')}")
-                    # Gate отдает symbol как BTC/USDT:USDT
-                    if symbol in p['symbol'] or p['symbol'] in symbol or 'SOL' in p['symbol']:
-                        # пробуем разные поля
-                        contracts_raw = p.get('contracts') or p.get('size') or p.get('info',{}).get('size') or p.get('info',{}).get('contracts') or 0
-                        try:
-                            contracts = float(contracts_raw)
-                        except:
-                            contracts = 0
-                        print(f"DEBUG contracts_raw={contracts_raw} -> {contracts}")
-                        if contracts != 0:
-                            size = abs(contracts)
-                            side = p.get('side')
-                            if not side:
-                                try:
-                                    side = 'long' if float(p.get('size',0))>0 or float(p.get('info',{}).get('size',0))>0 else 'short'
-                                except:
-                                    side = 'long'
-                            break
-                print(f"Позиция: {side} {size}")
-                if size == 0:
-                    print("⚠️ Позиция не найдена через fetch_positions, пробую закрыть 1 контракт напрямую с reduceOnly")
-                    # fallback - пробуем закрыть 1 контракт
+                    print(f"⚠️ fetch_position: {e}")
+                if not positions:
                     try:
-                        # пробуем узнать размер из запроса или ставим 1
-                        fallback_amount = float(amount_value) if str(amount_value).replace('.','',1).isdigit() else 1
-                        # если amount_type usdt - уже не важно, для фьючей берем 1
-                        if fallback_amount < 1:
-                            fallback_amount = 1
-                        # пробуем закрыть с reduceOnly
-                        if side == 'short':
-                            order = exchange.create_market_buy_order(symbol, fallback_amount, {'reduceOnly': True})
-                            print(f"🟢 ЗАКРЫВАЮ ШОРТ fallback {fallback_amount}...")
-                        else:
-                            order = exchange.create_market_sell_order(symbol, fallback_amount, {'reduceOnly': True})
-                            print(f"🔴 ЗАКРЫВАЮ ЛОНГ fallback {fallback_amount}...")
-                        # если дошли сюда - успех, дальше не идем
-                        print(f"✅ ОРДЕР ЗАКРЫТИЯ fallback ИСПОЛНЕН: {order['id']}")
-                        return jsonify({"ok": True, "order_id": order['id'], "symbol": order['symbol'], "side": order['side'], "amount": order['amount'], "fallback": True})
-                    except Exception as e2:
-                        print(f"❌ Fallback закрыть не вышло: {e2}")
-                        return jsonify({"error": "no open position to close", "details": str(e2)}), 400
-                # Закрываем
-                if side == 'long':
-                    order = exchange.create_market_sell_order(symbol, abs(size), {'reduceOnly': True})
-                    print(f"🔴 ЗАКРЫВАЮ ЛОНГ {abs(size)} {symbol}...")
-                else:
-                    order = exchange.create_market_buy_order(symbol, abs(size), {'reduceOnly': True})
-                    print(f"🟢 ЗАКРЫВАЮ ШОРТ {abs(size)} {symbol}...")
+                        positions = exchange.fetch_positions([symbol], {'settle': 'usdt'})
+                    except Exception as e:
+                        print(f"⚠️ fetch_positions filtered: {e}")
+                        positions = exchange.fetch_positions([], {'settle': 'usdt'})
+
+                size = 0.0
+                side = 'long'
+                for position in positions:
+                    psymbol = str(position.get('symbol', ''))
+                    info = position.get('info') or {}
+                    if symbol not in psymbol and 'SOL/USDT' not in psymbol and str(info.get('contract', '')) != 'SOL_USDT':
+                        continue
+                    raw_size = position.get('contracts')
+                    if raw_size in (None, '', 0, '0'):
+                        raw_size = position.get('size', info.get('size', 0))
+                    try:
+                        signed_size = float(raw_size or 0)
+                    except (TypeError, ValueError):
+                        signed_size = 0.0
+                    if signed_size != 0:
+                        size = abs(signed_size)
+                        side = position.get('side') or ('long' if signed_size > 0 else 'short')
+                        break
+
+                print(f"Позиция для закрытия: symbol={symbol} side={side} size={size}")
+                if size <= 0:
+                    # Идемпотентный ответ: повторный SELL не создает новый шорт
+                    return jsonify({"ok": True, "closed": False, "reason": "no_open_position"}), 200
+
+                close_side = 'sell' if side == 'long' else 'buy'
+                params = {'reduceOnly': True, 'settle': 'usdt'}
+                print(f"{'🔴' if close_side == 'sell' else '🟢'} ЗАКРЫВАЮ {side}: {size} {symbol}...")
+                order = exchange.create_order(symbol, 'market', close_side, size, None, params)
 
         print(f"✅ ОРДЕР ИСПОЛНЕН: {order['id']} | {order['symbol']} | {order['side']} {order['amount']}")
         print(f"{'='*50}\n")
