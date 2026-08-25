@@ -148,8 +148,8 @@ def webhook():
             amount = float(amount)
             print(f"Пересчитано в монеты: {amount} {symbol}")
 
-        # Для продажи - если usdt, то продаем на N USDT (тоже пересчитываем)
-        if amount_type == 'usdt' and action in ['sell', 'short', 'close']:
+        # Для продажи - если usdt, то продаем на N USDT (только для спота, для фьючей закрываем всю позицию)
+        if MARKET_TYPE == 'spot' and amount_type == 'usdt' and action in ['sell', 'short', 'close']:
             # Для sell если указан usdt - просто продаем эквивалент
             # Но для спота нужно проверить баланс
             if action == 'sell':
