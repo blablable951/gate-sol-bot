@@ -224,13 +224,33 @@ def webhook():
                             break
                 print(f"Позиция: {side} {size}")
                 if size == 0:
-                    return jsonify({"error": "no open position to close"}), 400
+                    print("⚠️ Позиция не найдена через fetch_positions, пробую закрыть 1 контракт напрямую с reduceOnly")
+                    # fallback - пробуем закрыть 1 контракт
+                    try:
+                        # пробуем узнать размер из запроса или ставим 1
+                        fallback_amount = float(amount_value) if str(amount_value).replace('.','',1).isdigit() else 1
+                        # если amount_type usdt - уже не важно, для фьючей берем 1
+                        if fallback_amount < 1:
+                            fallback_amount = 1
+                        # пробуем закрыть с reduceOnly
+                        if side == 'short':
+                            order = exchange.create_market_buy_order(symbol, fallback_amount, {'reduceOnly': True})
+                            print(f"🟢 ЗАКРЫВАЮ ШОРТ fallback {fallback_amount}...")
+                        else:
+                            order = exchange.create_market_sell_order(symbol, fallback_amount, {'reduceOnly': True})
+                            print(f"🔴 ЗАКРЫВАЮ ЛОНГ fallback {fallback_amount}...")
+                        # если дошли сюда - успех, дальше не идем
+                        print(f"✅ ОРДЕР ЗАКРЫТИЯ fallback ИСПОЛНЕН: {order['id']}")
+                        return jsonify({"ok": True, "order_id": order['id'], "symbol": order['symbol'], "side": order['side'], "amount": order['amount'], "fallback": True})
+                    except Exception as e2:
+                        print(f"❌ Fallback закрыть не вышло: {e2}")
+                        return jsonify({"error": "no open position to close", "details": str(e2)}), 400
                 # Закрываем
                 if side == 'long':
-                    order = exchange.create_market_sell_order(symbol, abs(size))
+                    order = exchange.create_market_sell_order(symbol, abs(size), {'reduceOnly': True})
                     print(f"🔴 ЗАКРЫВАЮ ЛОНГ {abs(size)} {symbol}...")
                 else:
-                    order = exchange.create_market_buy_order(symbol, abs(size))
+                    order = exchange.create_market_buy_order(symbol, abs(size), {'reduceOnly': True})
                     print(f"🟢 ЗАКРЫВАЮ ШОРТ {abs(size)} {symbol}...")
 
         print(f"✅ ОРДЕР ИСПОЛНЕН: {order['id']} | {order['symbol']} | {order['side']} {order['amount']}")
