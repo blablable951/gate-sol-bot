@@ -201,13 +201,26 @@ def webhook():
                     positions = exchange.fetch_positions()
                 size = 0
                 side = None
+                print(f"DEBUG positions raw: {positions}")
                 for p in positions:
+                    print(f"DEBUG p: symbol={p.get('symbol')} side={p.get('side')} contracts={p.get('contracts')} size={p.get('size')} info_size={p.get('info',{}).get('size')}")
                     # Gate отдает symbol как BTC/USDT:USDT
-                    if symbol in p['symbol'] or p['symbol'] in symbol:
-                        contracts = float(p.get('contracts') or p.get('size') or 0)
+                    if symbol in p['symbol'] or p['symbol'] in symbol or 'SOL' in p['symbol']:
+                        # пробуем разные поля
+                        contracts_raw = p.get('contracts') or p.get('size') or p.get('info',{}).get('size') or p.get('info',{}).get('contracts') or 0
+                        try:
+                            contracts = float(contracts_raw)
+                        except:
+                            contracts = 0
+                        print(f"DEBUG contracts_raw={contracts_raw} -> {contracts}")
                         if contracts != 0:
-                            size = contracts
-                            side = p.get('side') or ('long' if float(p.get('size',0))>0 else 'short')
+                            size = abs(contracts)
+                            side = p.get('side')
+                            if not side:
+                                try:
+                                    side = 'long' if float(p.get('size',0))>0 or float(p.get('info',{}).get('size',0))>0 else 'short'
+                                except:
+                                    side = 'long'
                             break
                 print(f"Позиция: {side} {size}")
                 if size == 0:
