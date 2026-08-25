@@ -1,1 +1,4 @@
-﻿.envn*.pycn
+.env
+__pycache__/
+*.pyc
+.ngrok/
