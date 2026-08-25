@@ -171,16 +171,19 @@ def webhook():
                 positions = []
                 try:
                     position = exchange.fetch_position(symbol, {'settle': 'usdt'})
-                    if position:
+                    if isinstance(position, dict) and position:
                         positions = [position]
                 except Exception as e:
                     print(f"⚠️ fetch_position: {e}")
                 if not positions:
                     try:
-                        positions = exchange.fetch_positions([symbol], {'settle': 'usdt'})
+                        result = exchange.fetch_positions([symbol], {'settle': 'usdt'})
+                        positions = result if isinstance(result, list) else []
                     except Exception as e:
                         print(f"⚠️ fetch_positions filtered: {e}")
-                        positions = exchange.fetch_positions([], {'settle': 'usdt'})
+                        result = exchange.fetch_positions([], {'settle': 'usdt'})
+                        positions = result if isinstance(result, list) else []
+                positions = [p for p in positions if isinstance(p, dict)]
 
                 size = 0.0
                 side = 'long'
